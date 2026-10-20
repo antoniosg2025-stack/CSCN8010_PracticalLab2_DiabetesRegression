@@ -7,17 +7,28 @@ Set-Location -Path $PSScriptRoot
 
 function Fail($msg) { Write-Host "ERROR: $msg" -ForegroundColor Red; exit 1 }
 
-# 1. Python 3.11 or newer
-$py = Get-Command python -ErrorAction SilentlyContinue
-if (-not $py) { Fail "Python was not found. Install Python 3.11+ and add it to PATH." }
-$ver = & python -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')"
-if ([version]$ver -lt [version]"3.11") { Fail "Python $ver found; Python 3.11 or newer is required." }
-Write-Host "Python $ver found."
+# 1. Find Python 3.11 or newer (Windows "py" launcher first, then "python").
+#    The Microsoft Store "python" alias is skipped because it is not a real interpreter.
+$pyCmd = $null
+$ErrorActionPreference = "Continue"
+foreach ($cand in @(@("py", "-3"), @("python"))) {
+    if (-not (Get-Command $cand[0] -ErrorAction SilentlyContinue)) { continue }
+    $exe = $cand[0]; $extra = @($cand | Select-Object -Skip 1)
+    $out = $null
+    try { $out = & $exe @extra -c "import sys; print(f'{sys.version_info[0]}.{sys.version_info[1]}')" 2>$null } catch { continue }
+    if ($LASTEXITCODE -eq 0 -and $out -match '^\d+\.\d+$' -and [version]$out -ge [version]"3.11") {
+        $pyCmd = $cand; $ver = $out; break
+    }
+}
+$ErrorActionPreference = "Stop"
+if (-not $pyCmd) { Fail "Python 3.11 or newer was not found. Install it from python.org (tick 'Add python.exe to PATH') and run this script again." }
+Write-Host "Python $ver found ($($pyCmd -join ' '))."
 
 # 2. Virtual environment
 if (-not (Test-Path ".venv\Scripts\python.exe")) {
     Write-Host "Creating .venv ..."
-    & python -m venv .venv
+    $exe = $pyCmd[0]; $extra = @($pyCmd | Select-Object -Skip 1)
+    & $exe @extra -m venv .venv
     if ($LASTEXITCODE -ne 0) { Fail "Could not create the virtual environment." }
 }
 $venvPy = ".\.venv\Scripts\python.exe"
